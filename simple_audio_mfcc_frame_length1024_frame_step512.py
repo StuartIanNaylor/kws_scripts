@@ -186,8 +186,18 @@ test_acc = sum(y_pred == y_true) / len(y_true)
 print(f'Test set accuracy: {test_acc:.0%}')
 
 time_end=time.perf_counter()
+print(f'Run time {time_end - time_start}')
 
 model.save('cnn-model')
+
+converter = tf.lite.TFLiteConverter.from_saved_model('cnn-model') # path to the SavedModel directory
+tflite_model = converter.convert()
+
+# Save the model.
+with open('model.tflite', 'wb') as f:
+  f.write(tflite_model)
+
+
 
 sample_file = data_dir/'kw/pp0-raspberry-1001.wav'
 
@@ -226,9 +236,59 @@ for spectrogram, label in sample_ds.batch(1):
   print(f'Predictions for "{commands[label[0]]}"')
   print(commands, tf.nn.softmax(prediction[0]))
 
-time_end=time.perf_counter()
-print(f'Run time {time_end - time_start}')
+# Load the TFLite model and allocate tensors.
+interpreter = tf.lite.Interpreter(model_path="model.tflite")
+interpreter.allocate_tensors()
+
+# Get input and output tensors.
+input_details = interpreter.get_input_details()
+output_details = interpreter.get_output_details()
+
+print(input_details[0]['shape'])
+
+sample_file = data_dir/'kw/pp0-raspberry-1001.wav'
+
+sample_ds = preprocess_dataset([str(sample_file)])
+
+for spectrogram, label in sample_ds.batch(1):
+  interpreter.set_tensor(input_details[0]['index'], spectrogram)
+  
+interpreter.invoke()
+output_data = interpreter.get_tensor(output_details[0]['index'])
+print(output_data)
 
 
+sample_file = data_dir/'kw/pp15-raspberry-10m001.wav'
+
+sample_ds = preprocess_dataset([str(sample_file)])
+
+for spectrogram, label in sample_ds.batch(1):
+  interpreter.set_tensor(input_details[0]['index'], spectrogram)
+  
+interpreter.invoke()
+output_data = interpreter.get_tensor(output_details[0]['index'])
+print(output_data)
+  
+sample_file = data_dir/'not-kw/pp0-pangram1-10m-1012.wav'
+
+sample_ds = preprocess_dataset([str(sample_file)])
+
+for spectrogram, label in sample_ds.batch(1):
+  interpreter.set_tensor(input_details[0]['index'], spectrogram)
+  
+interpreter.invoke()
+output_data = interpreter.get_tensor(output_details[0]['index'])
+print(output_data)
+  
+sample_file = data_dir/'kw/pp16-raspberry-30m017.wav'
+
+sample_ds = preprocess_dataset([str(sample_file)])
+
+for spectrogram, label in sample_ds.batch(1):
+  interpreter.set_tensor(input_details[0]['index'], spectrogram)
+  
+interpreter.invoke()
+output_data = interpreter.get_tensor(output_details[0]['index'])
+print(output_data)
 
 
