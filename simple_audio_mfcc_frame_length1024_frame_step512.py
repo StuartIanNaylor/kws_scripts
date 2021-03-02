@@ -185,6 +185,10 @@ y_true = test_labels
 test_acc = sum(y_pred == y_true) / len(y_true)
 print(f'Test set accuracy: {test_acc:.0%}')
 
+time_end=time.perf_counter()
+
+model.save('cnn-model')
+
 sample_file = data_dir/'kw/pp0-raspberry-1001.wav'
 
 sample_ds = preprocess_dataset([str(sample_file)])
@@ -203,8 +207,6 @@ for spectrogram, label in sample_ds.batch(1):
   prediction = model(spectrogram)
   print(f'Predictions for "{commands[label[0]]}"')
   print(commands, tf.nn.softmax(prediction[0]))
-
-time_end=time.perf_counter()
 
 sample_file = data_dir/'not-kw/pp0-pangram1-10m-1012.wav'
 
