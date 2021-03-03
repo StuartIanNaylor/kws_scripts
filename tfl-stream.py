@@ -5,7 +5,7 @@ Whenever you say "stop", the LED should flash briefly
 
 import sounddevice as sd
 import numpy as np
-import scipy.signal
+from scipy.io.wavfile import write
 import timeit
 import python_speech_features
 import tensorflow as tf
@@ -22,7 +22,9 @@ num_channels = 1
 # Sliding window
 window = np.zeros(16000)
 
+window_pos = 0
 
+z = 0
 # Load the TFLite model and allocate tensors.
 interpreter = tf.lite.Interpreter(model_path="model.tflite")
 interpreter.allocate_tensors()
@@ -36,7 +38,8 @@ print(input_details[0]['shape'])
 def sd_callback(rec, frames, time, status):
 
     
-
+    global window_pos
+    global z
     # Start timing for testing
     start = timeit.default_timer()
     
@@ -44,12 +47,17 @@ def sd_callback(rec, frames, time, status):
     if status:
         print('Error:', status)
     
+    window_pos = window_pos + 1
     # Remove 2nd dimension from recording sample
     rec = np.squeeze(rec)
-    #print(rec.shape)
     # Save recording onto sliding window
-    np.roll(window,3200)
-    window[0:3200] = rec
+    np.roll(window,-3200)
+    window[12800:] = rec
+    if window_pos == 5:
+      write("1sec-" + str(z) + ".wav", 16000, window)
+      z = z + 1
+      window_pos = 0
+      
     #print(window, tf.shape(window))
     # Padding for files with less than 16000 samples
     zero_padding = tf.zeros([16000] - tf.shape(window), dtype=tf.float32)
