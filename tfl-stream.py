@@ -1,103 +1,79 @@
-"""
-Connect a resistor and LED to board pin 8 and run this script.
-Whenever you say "stop", the LED should flash briefly
-"""
-
 import sounddevice as sd
 import numpy as np
-from scipy.io.wavfile import write
 import timeit
-import python_speech_features
-import tensorflow as tf
+import tensorflow.compat.v1 as tf
 
 
 # Parameters
 debug_time = 0
 debug_acc = 0
-word_threshold = 0.5
-rec_duration = 0.2
+word_threshold = 10.0
+rec_duration = 0.020
 sample_rate = 16000
 num_channels = 1
 
-# Sliding window
-window = np.zeros(16000)
-
-window_pos = 0
-
-z = 0
 # Load the TFLite model and allocate tensors.
-interpreter = tf.lite.Interpreter(model_path="model.tflite")
+interpreter = tf.lite.Interpreter(model_path="models2/crnn_state/quantize_opt_for_size_tflite_stream_state_external/stream_state_external.tflite")
 interpreter.allocate_tensors()
 
 # Get input and output tensors.
 input_details = interpreter.get_input_details()
 output_details = interpreter.get_output_details()
 
-print(input_details[0]['shape'])
-
+last_argmax = 0
+out_max = 0
+hit_tensor = []
+inputs = []
+for s in range(len(input_details)):
+  inputs.append(np.zeros(input_details[s]['shape'], dtype=np.float32))
+    
 def sd_callback(rec, frames, time, status):
 
-    
-    global window_pos
-    global z
-    # Start timing for testing
+    global last_argmax
+    global out_max
+    global hit_tensor
+    global inputs
     start = timeit.default_timer()
     
     # Notify if errors
     if status:
         print('Error:', status)
     
-    window_pos = window_pos + 1
-    # Remove 2nd dimension from recording sample
-    rec = np.squeeze(rec)
-    # Save recording onto sliding window
-    np.roll(window,-3200)
-    window[12800:] = rec
-    if window_pos == 5:
-      write("1sec-" + str(z) + ".wav", 16000, window)
-      z = z + 1
-      window_pos = 0
-      
-    #print(window, tf.shape(window))
-    # Padding for files with less than 16000 samples
-    zero_padding = tf.zeros([16000] - tf.shape(window), dtype=tf.float32)
-
-    # Concatenate audio with padding so that all audio clips will be of the 
-    # same length
-    waveform = tf.cast(window, tf.float32)
-    equal_length = tf.concat([waveform, zero_padding], 0)
-    spectrogram = tf.signal.stft(equal_length, frame_length=1024, frame_step=512)
-
-    spectrogram = tf.abs(spectrogram)
-  
-    # Warp the linear scale spectrograms into the mel-scale.
-    num_spectrogram_bins = spectrogram.shape[-1]
-    lower_edge_hertz, upper_edge_hertz, num_mel_bins = 80.0, 7600.0, 80
-    linear_to_mel_weight_matrix = tf.signal.linear_to_mel_weight_matrix(num_mel_bins, num_spectrogram_bins, sample_rate, lower_edge_hertz, upper_edge_hertz)
-    mel_spectrogram = tf.tensordot(spectrogram, linear_to_mel_weight_matrix, 1)
-    mel_spectrogram.set_shape(spectrogram.shape[:-1].concatenate(linear_to_mel_weight_matrix.shape[-1:]))
-
-    # Compute a stabilized log to get log-magnitude mel-scale spectrograms.
-    log_mel_spectrogram = tf.math.log(mel_spectrogram + 1e-6)
-
-    # Compute MFCCs from log_mel_spectrograms and take the first 13.
-    mfccs = tf.signal.mfccs_from_log_mel_spectrograms(log_mel_spectrogram)[..., :13]
-    mfccs = tf.reshape(mfccs, [1, 30, 13,  1])
-    #print(mfccs.shape)
+    rec = np.reshape(rec, (1, 320))
+    
     # Make prediction from model
-    interpreter.set_tensor(input_details[0]['index'], mfccs)
+    interpreter.set_tensor(input_details[0]['index'], rec.astype(np.float32))
+    # set input states (index 1...)
+    for s in range(1, len(input_details)):
+      interpreter.set_tensor(input_details[s]['index'], inputs[s])
   
     interpreter.invoke()
     output_data = interpreter.get_tensor(output_details[0]['index'])
-    print(output_data)
-    val = output_data[0][0]
+    # get output states and set it back to input states
+    # which will be fed in the next inference cycle
+    for s in range(1, len(input_details)):
+      # The function `get_tensor()` returns a copy of the tensor data.
+      # Use `tensor()` in order to get a pointer to the tensor.
+      inputs[s] = interpreter.get_tensor(output_details[s]['index'])
+      
+    out_tflite_argmax = np.argmax(output_data)
+    if last_argmax == out_tflite_argmax:
+      if output_data[0][out_tflite_argmax] > out_max:
+        out_max = output_data[0][out_tflite_argmax]
+        hit_tensor = output_data
+    else:
+      print(last_argmax, out_max, hit_tensor)
+      out_max = 0
     
-    if val > word_threshold:
-        print('raspberry')
+    last_argmax = out_tflite_argmax
+    
+    #if out_tflite_argmax == 2:
+        #print('raspberry')
+        #print(output_data[0][2])
         
 
     if debug_acc:
-        print(val)
+        print(out_tflite_argmax)
     
     if debug_time:
         print(timeit.default_timer() - start)
